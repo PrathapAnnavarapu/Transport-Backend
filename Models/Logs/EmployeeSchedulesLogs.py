@@ -11,4 +11,6 @@ class EmployeeScheduleLogs(db.Model):
     created_by_id = db.Column(db.String(50), nullable=False)
     created_by_name = db.Column(db.String(100), nullable=False)
     notes = db.Column(db.Text, nullable=True)  # Optional details or JSON of changes
+    request_source = db.Column(db.String(50), nullable=True)  # ✅ NEW COLUMN
     schedule = db.relationship('Employees_schedules', back_populates='logs')
+

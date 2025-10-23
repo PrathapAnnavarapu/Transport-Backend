@@ -7,8 +7,6 @@ class PickupRouting(db.Model):
     employee_id = db.Column(db.String(20), db.ForeignKey('employees.employee_id'), nullable=False)
     schedule_id = db.Column(db.Integer, db.ForeignKey('employees_schedules.schedule_id'), nullable=False)
     vehicle_id = db.Column(db.Integer, db.ForeignKey('vechile_details.id'), nullable=False)
-
-
     pickup_sequence = db.Column(db.Integer, nullable=False)
     distance_from_last = db.Column(db.Float, nullable=False)
     cumulative_distance = db.Column(db.Float, nullable=False)
@@ -29,7 +27,6 @@ class PickupRouting(db.Model):
     schedule = db.relationship('Employees_schedules', backref='pickup_routing_data', lazy=True)
     vehicle = db.relationship('VechileDetails', backref='pickup_routing_data', lazy=True)
     trip_links = db.relationship('PickupTripEmployeeLink', back_populates='pickup_routing')
-
     trip_billings = db.relationship(
         'PickupTripBilling',
         secondary='pickup_trip_employee_link',

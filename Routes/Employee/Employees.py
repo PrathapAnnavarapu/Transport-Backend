@@ -1,9 +1,10 @@
 from functools import wraps
 from flask import jsonify, request
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity,get_jwt
 from werkzeug.security import generate_password_hash, check_password_hash
 from geopy.geocoders import Nominatim
 import pandas as pd
+import json
 from werkzeug.utils import secure_filename
 import os
 from Models import db
@@ -66,7 +67,7 @@ def upload_employees():
         required_columns = [
             'employee_name', 'employee_address', 'employee_email', 'gender',
             'employee_mobile_no', 'employee_id', 'role', 'process',
-            'poc_name', 'poc_mobile_no', 'Geocode'
+            'poc_name', 'poc_mobile_no', 'Geocode', 'home_area', 'active_status', 'work_location'
         ]
 
         # Check if all required columns are present
@@ -101,7 +102,12 @@ def upload_employees():
                 poc_name=row.get('poc_name', ''),
                 poc_mobile_no=str(row.get('poc_mobile_no', '')),
                 latitude=latitude,
-                longitude=longitude
+                longitude=longitude,
+                home_area=row['home_area'],
+                active_status=row['active_status'],
+                work_location=row['work_location']
+
+
             )
             employees.append(user)
 
@@ -125,7 +131,7 @@ def add():
     if not data:
         return jsonify({'error': 'req data is empty'}), 400
 
-    new_user = Employees(employee_name=data['employee_name'], employee_address= data['employee_address'],employee_email=data['employee_email'], gender= data['gender'], employee_mobile_no=data['employee_mobile_no'], employee_id = data['employee_id'], role=data['role'], process=data['process'], poc_name=data['poc_name'], poc_mobile_no=data['poc_mobile_no'], latitude=data['latitude'], longitude=data['longitude'])
+    new_user = Employees(employee_name=data['employee_name'], employee_address= data['employee_address'],employee_email=data['employee_email'], gender= data['gender'], employee_mobile_no=data['employee_mobile_no'], employee_id = data['employee_id'], role=data['role'], process=data['process'], poc_name=data['poc_name'], poc_mobile_no=data['poc_mobile_no'], latitude=data['latitude'], longitude=data['longitude'], home_area=data['home_area'], active_status=data['active_status'], work_location=data['work_location'])
     db.session.add(new_user)
     db.session.commit()
     return jsonify({'message': 'Employee added successfully'}), 201
@@ -156,32 +162,51 @@ def set_password():
 @home.route('/employee/login', methods=['POST'])
 def login():
     data = request.get_json()
-    phone_no = data['phone']
-    password= data['password']
+    phone_no = data.get('phone')
+    password = data.get('password')
 
-    user = Employees.query.filter_by(employee_mobile_no = phone_no).first()
+    if not phone_no or not password:
+        return jsonify({'message': 'Phone number and password are required'}), 400
 
+    user = Employees.query.filter_by(employee_mobile_no=phone_no).first()
     if not user:
         return jsonify({'message': 'User not found'}), 404
-
     if not user.password:
         return jsonify({'message': 'Please set a password to login'}), 403
 
-    if check_password_hash(user.password, password):  # Replace with proper password check
-        access_token = create_access_token(identity={'employee_name': user.employee_name, 'employee_email': user.employee_email,'employee_id': user.employee_id, 'role':user.role})
-        return jsonify(access_token=access_token, ok = True), 200
-    else:
-        return jsonify({'message': 'Invalid credentials'}), 401
+    if check_password_hash(user.password, password):
+        # ✅ Identity must be a simple type (str/int)
+        identity = str(user.employee_id)
+
+        # Store the rest of user info in additional_claims
+        additional_claims = {
+            "employee_name": user.employee_name,
+            "employee_email": user.employee_email,
+            "role": user.role,
+            "work_location":user.work_location
+        }
+
+        access_token = create_access_token(identity=identity, additional_claims=additional_claims)
+        return jsonify(access_token=access_token, ok=True), 200
+
+    return jsonify({'message': 'Invalid credentials'}), 401
 
 
 @home.route('/employees/all', methods=['GET', 'OPTIONS'])
+@jwt_required(optional=True)
 def get_users():
+    print(dict(request.headers))
     if request.method == 'OPTIONS':
         return '', 200
-    data = Employees.query.all()
+    claims = get_jwt()  # contains additional_claims set during token creation
+    location = claims.get('work_location')
+    data = Employees.query.filter_by(work_location=location).all()
+
     users_list = [{'id': e.id, 'employee_name': e.employee_name, 'employee_id': e.employee_id,
                    'employee_address': e.employee_address, 'employee_mobile_no': e.employee_mobile_no,
-                   'gender': e.gender, 'employee_email': e.employee_email, 'role': e.role} for e in data]
+                   'gender': e.gender, 'employee_email': e.employee_email, 'role': e.role, 'process':e.process,
+                   'poc_name':e.poc_name, 'poc_mobile_no':e.poc_mobile_no, 'active_status':e.active_status,
+                   'home_area':e.home_area, 'work_location':e.work_location} for e in data]
     return jsonify(users_list), 200
 
 

@@ -13,12 +13,14 @@ class Employees(db.Model):
     latitude = db.Column(db.Float, nullable=False)
     longitude = db.Column(db.Float, nullable=False)
     gender = db.Column(db.String(20), nullable=False)
+    home_area=db.Column(db.String(200), nullable=False)
+    active_status = db.Column(db.String(200), nullable=False)
     employee_mobile_no = db.Column(db.BigInteger, unique=True, nullable=False)
     employee_email = db.Column(db.String(120), unique=True, nullable=False)
     process = db.Column(db.String(120), nullable=False)
     password = db.Column(db.String(200), nullable=True)  # Consider hashing in logic
     role = db.Column(db.String(100), nullable=False)
-
+    work_location = db.Column(db.String(100), nullable=False)
     poc_name = db.Column(db.String(120), nullable=True)
     poc_mobile_no = db.Column(db.BigInteger, nullable=True)
 

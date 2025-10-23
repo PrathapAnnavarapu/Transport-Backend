@@ -12,21 +12,17 @@ ist = pytz.timezone('Asia/Kolkata')
 
 
 def check_and_finalize_trip(vehicle_id, schedule_id):
-    trip_entries = PickupRouting.query.filter_by(
-        vehicle_id=vehicle_id,
-    ).all()
+    if not schedule_id:
+        raise ValueError("❌ schedule_id is required to finalize pickup trip billing.")
 
+    trip_entries = PickupRouting.query.filter_by(vehicle_id=vehicle_id).all()
     if not trip_entries:
-        return False  # No trip found
+        return False
 
     all_dropped = all(entry.off_board_OTP_entered_at is not None for entry in trip_entries)
 
     if all_dropped:
-
-
-        print(f"Trip complete for vehicle {vehicle_id} schedule {schedule_id}")
-        # trigger_billing(vehicle_id, schedule_id)
-        print("Trip Completed")
+        print(f"✅ Pickup trip complete for vehicle {vehicle_id}, schedule {schedule_id}")
         calculate_fare_and_create_bill_for_pickup(vehicle_id, schedule_id)
         return True
 
@@ -45,19 +41,21 @@ def offboard_employee():
         return jsonify({"error": "Routing not found"}), 404
 
     if routing.off_board_OTP == otp:
-        # ✅ Save time in IST
         routing.off_board_OTP_entered_at = datetime.now(ist)
 
-
-        # ✅ Update drop trip status
         schedule = Employees_schedules.query.get(routing.schedule_id)
         if schedule:
             schedule.pickup_trip_status = 'Completed'
 
         db.session.commit()
 
-        # ✅ Trigger trip finalization
-        check_and_finalize_trip(routing.vehicle_id, routing.schedule_id)
+        if routing.schedule_id:
+            try:
+                check_and_finalize_trip(routing.vehicle_id, routing.schedule_id)
+            except Exception as e:
+                print(f"⚠️ Billing generation failed: {e}")
+        else:
+            print(f"⚠️ Skipped billing. schedule_id is None for routing_id={routing_id}")
 
         return jsonify({"message": "OTP verified and employee off-boarded"}), 200
 
@@ -67,13 +65,11 @@ def offboard_employee():
 @home.route('/employee/pickup/onboard', methods=['POST'])
 def onboard_employee():
     data = request.json
-
     routing_id = data['routing_id']
     otp = data['otp']
     entered_by = data.get('entered_by')
 
     routing = PickupRouting.query.get(routing_id)
-
     if not routing:
         return jsonify({"error": "Routing not found"}), 404
 
@@ -81,7 +77,6 @@ def onboard_employee():
         routing.on_board_OTP_entered_at = datetime.now(ist)
         routing.OTP_entered_by = entered_by
 
-        # ✅ Update pickup trip status
         schedule = Employees_schedules.query.get(routing.schedule_id)
         if schedule:
             schedule.pickup_trip_status = 'Picked Up'

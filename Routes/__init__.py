@@ -12,5 +12,8 @@ from .Vechile import VechileDetails
 from .Vechile import RoutingVechileUpdate
 from .TripBilling import PickupTripBillings, DropTripBillings, BillingPolicies, TripBillingReports
 from .Route.RouteOptimizing import PIckuproutingOTPVerify, DropRoutingOTPVerify
+from .SPOC import SpocList
+from .Logs import Employee_Schedule_Logs
+from .Locations import Locations
 
 

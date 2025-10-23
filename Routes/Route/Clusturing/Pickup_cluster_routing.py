@@ -18,7 +18,7 @@ from functools import lru_cache
 # Configuration Constants
 OFFICE_COORDINATES = [17.441640, 78.381263]
 AVERAGE_SPEED_KMPH = 10
-PROXIMITY_THRESHOLD_KM = 3.5
+PROXIMITY_THRESHOLD_KM = 2.5
 
 
 # Estimate travel time based on straight-line distance
@@ -43,27 +43,22 @@ def convert_manual_to_optimized_format(raw_data):
         cluster_list = []
 
         for idx, (cluster_key, cluster) in enumerate(clusters_dict.items(), start=1):
-            # Get the route name from the first employee's address in the cluster (as per your new request)
-            route_name = get_area_name_from_address_cached(
-                cluster.get("employeeList", [{}])[0].get('employee_address', "Unknown Address")
-            )
+            # ✅ Use home_area directly instead of parsing address
+            route_name = cluster.get("employeeList", [{}])[0].get('home_area', "UnknownRoute")
 
-            # Append the cluster to the cluster list with the necessary data
             cluster_list.append({
                 "cluster_id": idx,
-                "route_name": route_name,  # Add route_name here
-                "pickup_sequence": cluster.get("employeeList", [])  # List of employees in the pickup sequence
+                "route_name": route_name,
+                "pickup_sequence": cluster.get("employeeList", [])
             })
 
         result.append({
-            "pickup_time_group": time_group,  # Pickup time group (from raw data)
-            "destination": OFFICE_COORDINATES,  # Office coordinates as destination
-            "clusters": cluster_list  # List of clusters for this time group
+            "pickup_time_group": time_group,
+            "destination": OFFICE_COORDINATES,
+            "clusters": cluster_list
         })
 
     return result
-
-
 
 
 # Cluster employees by proximity using Haversine (DBSCAN)
@@ -97,78 +92,59 @@ def cluster_employees_by_proximity(employees, threshold_km=PROXIMITY_THRESHOLD_K
 def split_cluster_if_needed(cluster, max_size=4):
     return [cluster[i:i + max_size] for i in range(0, len(cluster), max_size)]
 
-# Function to get area name from address (address text as input)
-def get_area_name_from_address_cached(address):
-    if not address:
-        return "UnknownRoute"
-
-    parts = [p.strip() for p in address.split(",") if p.strip()]
-    if len(parts) >= 3:
-        return parts[2]  # Most likely area
-    elif len(parts) >= 2:
-        return parts[1]
-    else:
-        return parts[0]
 
 # Function to optimize group routes (updated for using address instead of coordinates)
 def optimize_group_routes_from_dict(grouped_employees_dict):
     result = []
 
     for pickup_time_str, employees in grouped_employees_dict.items():
-        pickup_group_time = parse_time(pickup_time_str)  # Parse pickup time for the group
-        clusters = cluster_employees_by_proximity(employees)  # Cluster employees by proximity
+        pickup_group_time = parse_time(pickup_time_str)
+        clusters = cluster_employees_by_proximity(employees)
 
         cluster_results = []
 
         for cluster_id, cluster in enumerate(clusters, start=1):
-            # Sort employees: farthest first (as per pickup logic)
             sorted_cluster = sorted(
                 cluster,
                 key=lambda e: geodesic(e['employee_coordinates'], OFFICE_COORDINATES).km,
-                # Sort based on proximity to office
-                reverse=True  # Farthest employees first
+                reverse=True
             )
 
-            # Calculate total route time based on proximity (no route distance)
             total_route_time = timedelta()
             travel_times = []
-            current_time = pickup_group_time  # Start with pickup group time
+            current_time = pickup_group_time
 
             for i in range(len(sorted_cluster)):
-                # Calculate travel time using straight-line distance between two consecutive employees
                 origin = sorted_cluster[i]['employee_coordinates']
                 dest = sorted_cluster[i + 1]['employee_coordinates'] if i < len(sorted_cluster) - 1 else OFFICE_COORDINATES
 
-                dist = geodesic(origin, dest).km  # Straight-line distance between two points
-                travel_time = estimate_travel_time_km(dist)  # Estimate travel time for the segment
+                dist = geodesic(origin, dest).km
+                travel_time = estimate_travel_time_km(dist)
 
                 travel_times.append(travel_time)
                 total_route_time += travel_time
 
-            # Adjust for pickup times based on the travel times
-            current_time = pickup_group_time - total_route_time  # Start with pickup group time
+            current_time = pickup_group_time - total_route_time
             for idx, emp in enumerate(sorted_cluster):
-                emp['pickup_sequence'] = idx + 1  # Assign pickup sequence
-                emp['calculated_pickup_time'] = format_time(current_time)  # Assign pickup time
+                emp['pickup_sequence'] = idx + 1
+                emp['calculated_pickup_time'] = format_time(current_time)
 
-                # Update current time after this employee's pickup
                 if idx < len(travel_times):
                     current_time += travel_times[idx]
 
-            # Get the route name from the address of the last employee
-            last_employee_address = sorted_cluster[0]['employee_address']
-            route_name = get_area_name_from_address_cached(last_employee_address)  # Get route name based on last employee's address
+            # ✅ Use home_area directly for route name
+            route_name = sorted_cluster[0].get('home_area', 'UnknownRoute')
 
             cluster_results.append({
                 "cluster_id": cluster_id,
                 "route_name": route_name,
-                "pickup_sequence": sorted_cluster  # List of employees in the pickup sequence
+                "pickup_sequence": sorted_cluster
             })
 
         result.append({
-            "pickup_time_group": pickup_time_str,  # Pickup time group (in ISO format)
-            "destination": OFFICE_COORDINATES,  # Office coordinates as destination
-            "clusters": cluster_results  # List of clusters for this time group
+            "pickup_time_group": pickup_time_str,
+            "destination": OFFICE_COORDINATES,
+            "clusters": cluster_results
         })
 
     return result
@@ -214,7 +190,8 @@ def optimize_pickups():
                     'employee_id': employees.employee_id,
                     'employee_name': employees.employee_name,
                     'employee_address': employees.employee_address,
-                    'employee_coordinates': [employees.latitude, employees.longitude]
+                    'employee_coordinates': [employees.latitude, employees.longitude],
+                    'home_area': employees.home_area  # ✅ Added home_area field
                 })
 
         # Call the optimized route calculation function
