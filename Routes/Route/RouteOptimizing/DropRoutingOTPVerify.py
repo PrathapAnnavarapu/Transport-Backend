@@ -7,7 +7,7 @@ from Routes.TripBilling.DropTripBillings import calculate_fare_and_create_bill_f
 from Routes import home
 import pytz
 
-# Set timezone
+
 ist = pytz.timezone('Asia/Kolkata')
 
 
