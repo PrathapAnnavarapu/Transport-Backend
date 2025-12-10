@@ -16,6 +16,10 @@ def create_app():
     db.init_app(app)
     jwt = JWTManager(app)
     migrate = Migrate(app, db)
+    
+    # Initialize WebSocket
+    from services.websocket_server import init_socketio
+    socketio = init_socketio(app)
 
     # Enable CORS for all routes
     CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
@@ -24,9 +28,20 @@ def create_app():
         db.create_all()  # Create all tables based on the models defined
         db.session.commit()
 
+    # Register blueprints
     app.register_blueprint(home, url_prefix='/api')
-    return app
+    
+    # Register vehicle tracking blueprint
+    from Routes.VehicleTracking import vehicle_tracking_bp
+    app.register_blueprint(vehicle_tracking_bp)
+    
+    # Register employee app blueprint
+    from Routes.EmployeeApp import employee_app_bp
+    app.register_blueprint(employee_app_bp)
+    
+    return app, socketio  # Return both app and socketio
 
 if __name__ == '__main__':
-    app = create_app()
-    app.run(debug=True, port=5001)
+    app, socketio = create_app()
+    # Run with SocketIO instead of app.run()
+    socketio.run(app, debug=True, port=5001)

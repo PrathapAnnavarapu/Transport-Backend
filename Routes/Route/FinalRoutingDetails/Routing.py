@@ -261,7 +261,7 @@ def get_each_cluster_routing_details():
                 "pickup_time": str(routing.calculated_pickup_time),
                 "cumulative_distance": routing.cumulative_distance,
                 "distance_from_last": routing.distance_from_last,
-                "pickup_trip_status": routing.pickup_trip_status
+                "pickup_trip_status": schedule.pickup_trip_status  # ✅ FIX: Use correct field from schedule
             },
             "schedule": {
                 "pickup_time": str(schedule.pickup_time),

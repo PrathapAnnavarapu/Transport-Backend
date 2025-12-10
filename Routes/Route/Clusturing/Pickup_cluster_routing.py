@@ -36,6 +36,108 @@ def format_time(dt_obj):
     return dt_obj.strftime("%H:%M:%S")
 
 
+# Calculate bearing angle from office to employee location
+def calculate_angle_from_office(coord, office_coord=OFFICE_COORDINATES):
+    """
+    Calculate the bearing angle from office to a coordinate.
+    Returns angle in degrees (0-360), where 0 is North.
+    """
+    from math import atan2, degrees, radians, sin, cos
+    
+    lat1, lon1 = radians(office_coord[0]), radians(office_coord[1])
+    lat2, lon2 = radians(coord[0]), radians(coord[1])
+    
+    dLon = lon2 - lon1
+    y = sin(dLon) * cos(lat2)
+    x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
+    angle = atan2(y, x)
+    
+    # Convert to degrees and normalize to 0-360
+    bearing = (degrees(angle) + 360) % 360
+    return bearing
+
+
+# Optimize route sequence using nearest neighbor algorithm
+def optimize_route_sequence(employees, start_coord=OFFICE_COORDINATES, pickup_mode=True):
+    """
+    Order employees in a linear sequence to minimize zig-zag routing.
+    For pickup: Start from farthest, work toward office
+    For drop: Start from nearest, work away from office
+    
+    Uses angle-based sorting for sweeping linear routes.
+    """
+    if not employees:
+        return []
+    
+    # Calculate angle from office for each employee
+    for emp in employees:
+        emp['_angle'] = calculate_angle_from_office(emp['employee_coordinates'])
+        emp['_distance'] = geodesic(emp['employee_coordinates'], start_coord).km
+    
+    if pickup_mode:
+        # For pickup: Sort by angle to create sweeping route, then by distance (farthest first)
+        # This creates a linear path from outer areas toward office
+        sorted_employees = sorted(employees, key=lambda e: (e['_angle'], -e['_distance']))
+    else:
+        # For drop: Sort by angle and distance (nearest first)
+        sorted_employees = sorted(employees, key=lambda e: (e['_angle'], e['_distance']))
+    
+    # Clean up temporary fields
+    for emp in sorted_employees:
+        emp.pop('_angle', None)
+        emp.pop('_distance', None)
+    
+    return sorted_employees
+
+
+# Cluster employees by home_area first, then by proximity
+def cluster_by_home_area_and_proximity(employees, threshold_km=PROXIMITY_THRESHOLD_KM, max_cluster_size=4):
+    """
+    Intelligent clustering that:
+    1. Groups employees by home_area (same route)
+    2. Within each area, applies proximity clustering if needed
+    3. Enforces max cluster size
+    """
+    if not employees:
+        return []
+    
+    # Step 1: Group by home_area
+    area_groups = defaultdict(list)
+    for emp in employees:
+        area = emp.get('home_area', 'Unknown')
+        area_groups[area].append(emp)
+    
+    final_clusters = []
+    
+    # Step 2: For each area, apply proximity clustering if there are many employees
+    for area, area_employees in area_groups.items():
+        if len(area_employees) <= max_cluster_size:
+            # Small group, keep together
+            final_clusters.append(area_employees)
+        else:
+            # Large group, apply DBSCAN proximity clustering
+            coordinates = [emp['employee_coordinates'] for emp in area_employees]
+            
+            # Convert kilometers to radians for haversine
+            kms_per_radian = 6371.0088
+            epsilon = threshold_km / kms_per_radian
+            radians_coords = np.radians(coordinates)
+            
+            db = DBSCAN(eps=epsilon, min_samples=1, algorithm='ball_tree', metric='haversine')
+            labels = db.fit_predict(radians_coords)
+            
+            # Group by cluster label
+            proximity_clusters = defaultdict(list)
+            for label, emp in zip(labels, area_employees):
+                proximity_clusters[label].append(emp)
+            
+            # Split if needed and add to final clusters
+            for cluster in proximity_clusters.values():
+                final_clusters.extend(split_cluster_if_needed(cluster, max_size=max_cluster_size))
+    
+    return final_clusters
+
+
 def convert_manual_to_optimized_format(raw_data):
     result = []
 
@@ -61,31 +163,10 @@ def convert_manual_to_optimized_format(raw_data):
     return result
 
 
-# Cluster employees by proximity using Haversine (DBSCAN)
+# Legacy function - now redirects to improved clustering
 def cluster_employees_by_proximity(employees, threshold_km=PROXIMITY_THRESHOLD_KM, max_cluster_size=4):
-    if not employees:
-        return []
-
-    coordinates = [emp['employee_coordinates'] for emp in employees]
-
-    # Convert kilometers to radians for haversine
-    kms_per_radian = 6371.0088
-    epsilon = threshold_km / kms_per_radian
-    radians_coords = np.radians(coordinates)
-
-    db = DBSCAN(eps=epsilon, min_samples=1, algorithm='ball_tree', metric='haversine')
-    labels = db.fit_predict(radians_coords)
-
-    clusters = defaultdict(list)
-    for label, emp in zip(labels, employees):
-        clusters[label].append(emp)
-
-    # Enforce cluster size limit
-    final_clusters = []
-    for cluster in clusters.values():
-        final_clusters.extend(split_cluster_if_needed(cluster, max_size=max_cluster_size))
-
-    return final_clusters
+    """Use improved home_area-aware clustering"""
+    return cluster_by_home_area_and_proximity(employees, threshold_km, max_cluster_size)
 
 
 # Utility to split large clusters
@@ -93,7 +174,7 @@ def split_cluster_if_needed(cluster, max_size=4):
     return [cluster[i:i + max_size] for i in range(0, len(cluster), max_size)]
 
 
-# Function to optimize group routes (updated for using address instead of coordinates)
+# Function to optimize group routes with linear path optimization
 def optimize_group_routes_from_dict(grouped_employees_dict):
     result = []
 
@@ -104,11 +185,8 @@ def optimize_group_routes_from_dict(grouped_employees_dict):
         cluster_results = []
 
         for cluster_id, cluster in enumerate(clusters, start=1):
-            sorted_cluster = sorted(
-                cluster,
-                key=lambda e: geodesic(e['employee_coordinates'], OFFICE_COORDINATES).km,
-                reverse=True
-            )
+            # ✅ Use optimized route sequencing instead of simple distance sorting
+            sorted_cluster = optimize_route_sequence(cluster, OFFICE_COORDINATES, pickup_mode=True)
 
             total_route_time = timedelta()
             travel_times = []

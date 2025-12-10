@@ -15,6 +15,13 @@ from geopy.distance import geodesic
 from datetime import datetime
 from Routes import home
 
+# Import Locations model for multi-location support
+try:
+    from Models.Locations.Locations import Locations
+except ImportError:
+    # If model doesn't exist, will use default coordinates
+    Locations = None
+
 # source_coordinates = [17.441640, 78.381263]  # Office coordinates
 #
 #
@@ -197,7 +204,33 @@ from Routes import home
 #     return handle_pickup_routing(request_data)
 
 
-source_coordinates = [17.441640, 78.381263]  # Office coordinates
+# Default office coordinates (fallback if location not found)
+DEFAULT_OFFICE_COORDINATES = [17.441640, 78.381263]
+
+
+def get_location_coordinates(location_id=None, location_name=None):
+    """
+    Get office coordinates from database based on location_id or location_name.
+    Falls back to default if not found.
+    """
+    if not Locations:
+        return DEFAULT_OFFICE_COORDINATES
+    
+    try:
+        location = None
+        
+        if location_id:
+            location = Locations.query.get(location_id)
+        elif location_name:
+            location = Locations.query.filter_by(location_name=location_name).first()
+        
+        if location and location.latitude and location.longitude:
+            return [location.latitude, location.longitude]
+        else:
+            return DEFAULT_OFFICE_COORDINATES
+    except Exception as e:
+        print(f"Error fetching location coordinates: {e}")
+        return DEFAULT_OFFICE_COORDINATES
 
 
 def calculate_distance(origin, destination):
@@ -309,10 +342,12 @@ def get_route_distance_km(origin, destination):
         return distance_km
 
     except Exception as e:
-        print(f"Error in ORS API call: {e}")
+        # ✅ FIX: Add proper logging instead of print
+        import logging
+        logging.warning(f"ORS API call failed for route {origin} -> {destination}: {e}")
         # Fallback: Use geodesic as a direct line measurement
         geodesic_distance = round(geodesic(origin, destination).km, 2)
-        print(f"Using geodesic fallback distance: {geodesic_distance} km")
+        logging.info(f"Using geodesic fallback distance: {geodesic_distance} km")
         return geodesic_distance
 
 
@@ -337,6 +372,7 @@ def handle_pickup_routing(request_data):
     employee_with_distances = []
     all_routings = []
     total_combined_distance = 0  # Sum for final response
+    route_name = None  # Initialize to avoid undefined variable
 
     for cluster_data in shift_data:
         cluster_id = cluster_data.get("clusterId")
@@ -349,9 +385,9 @@ def handle_pickup_routing(request_data):
         if not employee_list:
             continue
 
-        if not vehicle:
-            vehicle_details = cluster_data.get("vehicleDetails", {})
-            vehicle = get_pickup_vehicle(vehicle_details)
+        # ✅ FIX: Get vehicle for EACH cluster (don't persist across clusters)
+        vehicle_details = cluster_data.get("vehicleDetails", {})
+        vehicle = get_pickup_vehicle(vehicle_details)
 
         cluster_routings = []
         employee_coordinates_chain = []  # For distance calculation
@@ -427,13 +463,18 @@ def handle_pickup_routing(request_data):
                 'cluster': cluster_id
             })
 
-        # ✅ Now calculate route distance: first employee → ... → last → office
+        # ✅ FIX: Calculate COMPLETE route distance: Office → First → ... → Last → Office
         route_distance = 0
-        for i in range(len(employee_coordinates_chain) - 1):
-            route_distance += get_route_distance_km(employee_coordinates_chain[i], employee_coordinates_chain[i + 1])
-
-        # Add last leg: last employee to office
+        
         if employee_coordinates_chain:
+            # Add FIRST leg: Office → First Employee (was missing!)
+            route_distance += get_route_distance_km(source_coordinates, employee_coordinates_chain[0])
+            
+            # Add middle legs: Employee → Employee
+            for i in range(len(employee_coordinates_chain) - 1):
+                route_distance += get_route_distance_km(employee_coordinates_chain[i], employee_coordinates_chain[i + 1])
+            
+            # Add LAST leg: Last Employee → Office
             route_distance += get_route_distance_km(employee_coordinates_chain[-1], source_coordinates)
 
         total_combined_distance += route_distance
@@ -556,6 +597,7 @@ def handle_drop_routing(request_data):
     employee_with_distances = []
     all_routings = []
     total_combined_distance = 0  # Total across clusters
+    route_name = None  # Initialize to avoid undefined variable
 
     for cluster_data in shift_data:
         cluster_id = cluster_data.get("clusterId")
@@ -567,9 +609,9 @@ def handle_drop_routing(request_data):
         if not employee_list:
             continue
 
-        if not vehicle:
-            vehicle_details = cluster_data.get("vehicleDetails", {})
-            vehicle = get_drop_vehicle(vehicle_details)
+        # ✅ FIX: Get vehicle for EACH cluster (don't persist across clusters)
+        vehicle_details = cluster_data.get("vehicleDetails", {})
+        vehicle = get_drop_vehicle(vehicle_details)
 
         cluster_routings = []
         employee_coordinates_list = [source_coordinates]  # Start at the office

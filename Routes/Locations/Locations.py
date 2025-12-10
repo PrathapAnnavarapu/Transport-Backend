@@ -1,116 +1,137 @@
-
-
-from flask import jsonify, request
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
-from werkzeug.security import generate_password_hash, check_password_hash
-from geopy.geocoders import Nominatim
-import pandas as pd
-import json
-from werkzeug.utils import secure_filename
-import os
+from flask import Blueprint, request, jsonify
 from Models import db
-from Models.Locations.Location import Locations
-from Routes import home
+try:
+    from Models.Locations.Locations import Locations
+except ImportError:
+    # Create Locations model if it doesn't exist
+    class Locations(db.Model):
+        __tablename__ = 'locations'
+        
+        id = db.Column(db.Integer, primary_key=True)
+        location_name = db.Column(db.String(100), nullable=False, unique=True)
+        location_address = db.Column(db.String(255))
+        latitude = db.Column(db.Float, nullable=False)
+        longitude = db.Column(db.Float, nullable=False)
+        is_active = db.Column(db.Boolean, default=True)
+        created_at = db.Column(db.DateTime, default=db.func.now())
+        
+        def to_dict(self):
+            return {
+                'id': self.id,
+                'location_name': self.location_name,
+                'location_address': self.location_address,
+                'latitude': self.latitude,
+                'longitude': self.longitude,
+                'is_active': self.is_active
+            }
+
+locations_bp = Blueprint('locations', __name__)
 
 
-
-@home.route('/add/new/location', methods=['POST'])
-def add_location():
-    data = request.get_json()
-
-    if not data:
-        return jsonify({'error': 'Request data is empty'}), 400
-
-    # required_fields = ['locationName', 'locationCode', 'address', 'city', 'state', 'country']
-    # for field in required_fields:
-    #     if not data.get(field):
-    #         return jsonify({'error': f'{field} is required'}), 400
-
+@locations_bp.route('/api/locations/all', methods=['GET'])
+def get_all_locations():
+    """Get all active locations"""
     try:
-        new_location = Locations(
-            location_name=data['locationName'],
-            location_code=data['locationCode'],
-            address=data['address'],
-            city=data['city'],
-            state=data['state'],
-            country=data['country'],
+        locations = Locations.query.filter_by(is_active=True).all()
+        return jsonify({
+            'success': True,
+            'data': [loc.to_dict() for loc in locations]
+        }), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@locations_bp.route('/api/locations/<int:location_id>', methods=['GET'])
+def get_location(location_id):
+    """Get specific location by ID"""
+    try:
+        location = Locations.query.get(location_id)
+        if not location:
+            return jsonify({'success': False, 'message': 'Location not found'}), 404
+        
+        return jsonify({
+            'success': True,
+            'data': location.to_dict()
+        }), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@locations_bp.route('/api/locations/add', methods=['POST'])
+def add_location():
+    """Add new location"""
+    try:
+        data = request.get_json()
+        
+        location = Locations(
+            location_name=data['location_name'],
+            location_address=data.get('location_address'),
+            latitude=data['latitude'],
+            longitude=data['longitude'],
             is_active=data.get('is_active', True)
         )
-
-        db.session.add(new_location)
+        
+        db.session.add(location)
         db.session.commit()
-        return jsonify({'message': 'Location added successfully', 'id': new_location.id}), 201
+        
+        return jsonify({
+            'success': True,
+            'message': 'Location added successfully',
+            'data': location.to_dict()
+        }), 201
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
-
-
-
-@home.route('/locations/all', methods=['GET', 'OPTIONS'])
-def get_locations():
-    if request.method == 'OPTIONS':
-        return '', 200
-
-    data = Locations.query.all()
-    locations_list = [
-        {
-            'id': loc.id,
-            'location_name': loc.location_name,
-            'location_code': loc.location_code,
-            'address': loc.address,
-            'city': loc.city,
-            'state': loc.state,
-            'country': loc.country,
-            'is_active': loc.is_active
-        }
-        for loc in data
-    ]
-    return jsonify(locations_list), 200
-
-
-
-@home.route('/locations/update/<int:location_id>', methods=['PUT'])
+@locations_bp.route('/api/locations/update/<int:location_id>', methods=['PUT'])
 def update_location(location_id):
-    data = request.get_json()
-
-    if not data:
-        return jsonify({'error': 'Request data is empty'}), 400
-
-    location = Locations.query.get(location_id)
-    if not location:
-        return jsonify({'error': 'Location not found'}), 404
-
+    """Update location"""
     try:
-        # Update only provided fields
-        location.location_name = data.get('location_name', location.location_name)
-        location.location_code = data.get('location_code', location.location_code)
-        location.address = data.get('address', location.address)
-        location.city = data.get('city', location.city)
-        location.state = data.get('state', location.state)
-        location.country = data.get('country', location.country)
-        location.is_active = data.get('is_active', location.is_active)
-
+        location = Locations.query.get(location_id)
+        if not location:
+            return jsonify({'success': False, 'message': 'Location not found'}), 404
+        
+        data = request.get_json()
+        
+        if 'location_name' in data:
+            location.location_name = data['location_name']
+        if 'location_address' in data:
+            location.location_address = data['location_address']
+        if 'latitude' in data:
+            location.latitude = data['latitude']
+        if 'longitude' in data:
+            location.longitude = data['longitude']
+        if 'is_active' in data:
+            location.is_active = data['is_active']
+        
         db.session.commit()
-        return jsonify({'message': 'Location updated successfully'}), 200
+        
+        return jsonify({
+            'success': True,
+            'message': 'Location updated successfully',
+            'data': location.to_dict()
+        }), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
-
-@home.route('/locations/delete/<int:location_id>', methods=['DELETE'])
+@locations_bp.route('/api/locations/delete/<int:location_id>', methods=['DELETE'])
 def delete_location(location_id):
-    location = Locations.query.get(location_id)
-
-    if not location:
-        return jsonify({'error': 'Location not found'}), 404
-
+    """Soft delete location (set is_active=False)"""
     try:
-        db.session.delete(location)
+        location = Locations.query.get(location_id)
+        if not location:
+            return jsonify({'success': False, 'message': 'Location not found'}), 404
+        
+        location.is_active = False
         db.session.commit()
-        return jsonify({'message': 'Location deleted successfully'}), 200
+        
+        return jsonify({
+            'success': True,
+            'message': 'Location deactivated successfully'
+        }), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
